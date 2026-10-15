@@ -5,8 +5,52 @@
 #define SUB_LCDC0_DATA    (*(volatile uint8_t *)0xB8010000u)
 #define SUB_LCDC1_COMMAND (*(volatile uint8_t *)0xBA000000u)
 #define SUB_LCDC1_DATA    (*(volatile uint8_t *)0xBA010000u)
+#define SUB_LCDC_RESET_PORT (*(volatile uint8_t *)0xA4050138u)
 
 static uint8_t framebuffer[SUB_LCDC_HEIGHT][SUB_LCDC_BYTES_PER_ROW];
+
+static void sub_lcdc_delay(uint32_t count)
+{
+	while (count--) __asm__("nop");
+}
+
+static void sub_lcdc_command_both(uint8_t command)
+{
+	SUB_LCDC0_COMMAND = command;
+	__asm__("synco");
+	SUB_LCDC1_COMMAND = command;
+	__asm__("synco");
+}
+
+void sub_lcdc_init(void)
+{
+	/* ROM32A 0x80064222, with its fixed board-presence check omitted. */
+	SUB_LCDC_RESET_PORT &= (uint8_t)~8u;
+	__asm__("synco");
+	sub_lcdc_delay(10);
+	SUB_LCDC_RESET_PORT |= 8u;
+	__asm__("synco");
+	sub_lcdc_delay(10);
+
+	sub_lcdc_command_both(0xa2);
+	sub_lcdc_command_both(0xa1);
+	sub_lcdc_command_both(0xc0);
+	sub_lcdc_command_both(0x25);
+	/* ROM g_bSubLCDContrast boot value. */
+	sub_lcdc_command_both(0x12);
+	sub_lcdc_command_both(0xe5);
+	sub_lcdc_command_both(0x34);
+	sub_lcdc_command_both(0x3d);
+	sub_lcdc_command_both(0x84);
+	sub_lcdc_command_both(0x2b);
+	sub_lcdc_delay(100);
+	sub_lcdc_command_both(0x2f);
+	sub_lcdc_delay(2000);
+	sub_lcdc_command_both(0x40);
+	sub_lcdc_clear(0);
+	sub_lcdc_flush();
+	sub_lcdc_command_both(0xaf);
+}
 
 static void sub_lcdc_write_page_byte(uint16_t x, uint8_t page, uint8_t value)
 {
