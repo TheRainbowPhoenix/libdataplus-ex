@@ -74,6 +74,12 @@ static int iic_transfer(uint8_t value, uint8_t control)
 {
 	IIC_ICDR = value;
 	if (control) IIC_ICCR = control;
+	/* ROM FUN_80042AF2 performs an additional completion wait after the
+	 * read-address phase (ICCR=0x81). Missing it leaves ICDR stale. */
+	if (control == 0x81u) {
+		IIC_ICSR &= (uint8_t)~2u;
+		if (!iic_wait(0x0au)) return 0;
+	}
 	IIC_ICSR &= (uint8_t)~2u;
 	return iic_wait(0x0au);
 }
@@ -105,12 +111,14 @@ static int touch_i2c_read_word(uint16_t *word)
 	iic_enable();
 	if (!iic_start() || !iic_transfer(0x91, 0x81)) goto fail;
 	IIC_ICSR &= (uint8_t)~2u;
-	if (!iic_wait(0x0au)) goto fail;
+	if (!iic_wait(1)) goto fail;
 	IIC_ICIC = 2;
 	high = IIC_ICDR;
-	IIC_ICSR &= (uint8_t)~2u;
 	if (!iic_wait(0x0au)) goto fail;
 	IIC_ICCR = 0xc0;
+	IIC_ICSR &= (uint8_t)~2u;
+	if (!iic_wait(1)) goto fail;
+	IIC_ICIC = 2;
 	low = IIC_ICDR;
 	iic_stop();
 	*word = ((uint16_t)high << 8) | low;
