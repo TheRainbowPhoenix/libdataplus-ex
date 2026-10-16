@@ -87,6 +87,11 @@ static int accel_write(uint8_t reg, uint8_t value)
 		!iic_send(reg, 0) || !iic_send(value, 1)) {
 		iic_stop(); return 0;
 	}
+	/* IIC_FinishWrite (ROM 0x80042B50) clears status bit 1 then waits for
+	 * ICSR.4. Disabling IIC before this edge was truncating configuration
+	 * writes, leaving the accelerometer at its reset defaults. */
+	IIC_ICSR &= (uint8_t)~2u;
+	if (!iic_wait(0x10u)) { iic_stop(); return 0; }
 	iic_stop();
 	return 1;
 }
