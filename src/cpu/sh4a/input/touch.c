@@ -6,6 +6,8 @@
 #define PFC_MSELCRA (*(volatile uint16_t *)0xA4050180u)
 #define ADC_ADCCSR  (*(volatile uint16_t *)0xA4610088u)
 #define ADC_ADPCTL  (*(volatile uint16_t *)0xA461008cu)
+#define CPG_FRQCR   (*(volatile uint32_t *)0xA4150000u)
+#define PORT_PLDR   (*(volatile uint8_t *)0xA4050134u)
 
 /* SH7724 IIC: byte-wide registers, four bytes apart. */
 #define IIC_ICDR (*(volatile uint8_t *)0xA4470000u)
@@ -56,8 +58,15 @@ static int iic_wait(uint8_t mask)
 static void iic_enable(void)
 {
 	IIC_ICCR |= 0x80;
-	IIC_ICCL = 0x12;
-	IIC_ICCH = 0x0c;
+	/* ROM IIC_ConfigureClock: FRQCR mode 3 uses 12/0c; every other
+	 * mode uses 25/19. The old fixed 12/0c timing corrupted transfers. */
+	if ((CPG_FRQCR & 0x0fu) == 3u) {
+		IIC_ICCL = 0x12;
+		IIC_ICCH = 0x0c;
+	} else {
+		IIC_ICCL = 0x25;
+		IIC_ICCH = 0x19;
+	}
 	IIC_ICSR &= 0xf1;
 }
 
@@ -130,21 +139,25 @@ fail:
 
 static int touch_i2c_axis(uint8_t command, uint16_t minimum, uint16_t maximum, uint16_t *result)
 {
-	uint16_t values[6], sum = 0;
+	uint16_t values[5], discard, filtered = 0x8000u;
 	uint8_t i, lowest = 0, highest = 0;
 	if (!touch_i2c_command(command)) return 0;
-	for (i = 0; i < 6; i++) {
+	/* ROM 0x800825e2 throws away one conversion, then retains five. */
+	if (!touch_i2c_read_word(&discard)) return 0;
+	for (i = 0; i < 5; i++) {
 		if (!touch_i2c_read_word(&values[i])) return 0;
 		values[i] >>= 4;
 		if (values[i] < values[lowest]) lowest = i;
 		if (values[i] > values[highest]) highest = i;
 	}
-	for (i = 0; i < 6; i++) {
+	for (i = 0; i < 5; i++) {
 		if (i == lowest || i == highest) continue;
 		if (values[i] < minimum || values[i] > maximum) return 0;
-		sum += values[i];
+		/* Match the ROM's running pairwise average, not a six-sample mean. */
+		if (filtered == 0x8000u) filtered = values[i];
+		else filtered = (uint16_t)((filtered + values[i]) >> 1);
 	}
-	*result = sum / 4u;
+	*result = filtered;
 	return 1;
 }
 
@@ -153,6 +166,9 @@ int touch_i2c_read(struct touch_i2c_sample *sample)
 	uint16_t x, y;
 	if (!sample) return 0;
 	/* ROM commands: C4 => X, D4 => Y, then C0 cleanup. */
+	/* The ROM accepts a point only while the active-low pen input remains low
+	 * across five reads. Without this guard idle bus noise looked like a touch. */
+	for (uint8_t pen = 0; pen < 5; pen++) if (PORT_PLDR & 1u) return 0;
 	if (!touch_i2c_axis(0xc4, 0x0050, 0x0ff5, &x) ||
 		!touch_i2c_axis(0xd4, 0x0070, 0x0ff1, &y)) return 0;
 	(void)touch_i2c_command(0xc0);

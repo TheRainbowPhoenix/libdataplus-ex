@@ -7,6 +7,7 @@
 #define IIC_ICIC (*(volatile uint8_t *)0xA447000cu)
 #define IIC_ICCL (*(volatile uint8_t *)0xA4470010u)
 #define IIC_ICCH (*(volatile uint8_t *)0xA4470014u)
+#define CPG_FRQCR (*(volatile uint32_t *)0xA4150000u)
 #define IIC_TIMEOUT 100000u
 #define ACCEL_I2C_WRITE 0x02u
 #define ACCEL_I2C_READ  0x03u
@@ -21,8 +22,13 @@ static int iic_wait(uint8_t mask)
 static void iic_enable(void)
 {
 	IIC_ICCR |= 0x80;
-	IIC_ICCL = 0x12;
-	IIC_ICCH = 0x0c;
+	if ((CPG_FRQCR & 0x0fu) == 3u) {
+		IIC_ICCL = 0x12;
+		IIC_ICCH = 0x0c;
+	} else {
+		IIC_ICCL = 0x25;
+		IIC_ICCH = 0x19;
+	}
 	IIC_ICSR &= 0xf1;
 }
 
